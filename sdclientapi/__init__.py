@@ -1,6 +1,7 @@
 import configparser
 import http
 import json
+import logging
 import os
 import requests
 from datetime import datetime
@@ -27,6 +28,9 @@ from .sdlocalobjects import (
 DEFAULT_PROXY_VM_NAME = "sd-proxy"
 DEFAULT_REQUEST_TIMEOUT = 20  # 20 seconds
 DEFAULT_DOWNLOAD_TIMEOUT = 60 * 60  # 60 minutes
+LOGLEVEL = os.environ.get('LOGLEVEL', 'info').upper()
+
+logger = logging.getLogger(__name__)
 
 
 class RequestTimeoutError(Exception):
@@ -71,6 +75,40 @@ def json_query(proxy_vm_name: str, data: str, timeout: Optional[int] = None) -> 
     else:
         output = stdout.decode("utf-8")
         return output.strip()
+
+
+def configure_logging() -> None:
+    safe_mkdir('sd-sdk')
+    log_file = os.path.join('sd-sdk', 'logs', 'sdk.log')
+
+    # set logging format
+    log_fmt = ('%(asctime)s - %(name)s:%(lineno)d(%(funcName)s) %(levelname)s: %(message)s')
+    formatter = logging.Formatter(log_fmt)
+
+    # define log handlers such as for rotating log files
+    handler = TimedRotatingFileHandler(
+        log_file, when='midnight', backupCount=5, delay=False, encoding=ENCODING)
+    handler.setFormatter(formatter)
+
+    # For rsyslog handler
+    if platform.system() != "Linux":  # pragma: no cover
+        syslog_file = "/var/run/syslog"
+    else:
+        syslog_file = "/dev/log"
+
+    sysloghandler = SysLogHandler(address=syslog_file)
+    sysloghandler.setFormatter(formatter)
+
+    # set up primary log
+    log = logging.getLogger()
+    log.setLevel(LOGLEVEL)
+    log.addHandler(handler)
+
+    # add the secondard logger
+    log.addHandler(sysloghandler)
+
+    # override excepthook to capture a log of catastrophic failures.
+    sys.excepthook = excepthook
 
 
 class API:
@@ -126,6 +164,11 @@ class API:
                 self.proxy_vm_name = config["proxy"]["name"]
         except Exception:
             pass  # We already have a default name
+
+        configure_logging()
+
+        # test that logging is working
+        logger.info('HELLO HELLO HELLO HELLO!')
 
     def _send_json_request(
         self,
